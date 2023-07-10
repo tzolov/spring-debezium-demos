@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-package com.example.sidebeziumdemo;
+package com.example.sidebeziumdemo.miscellaneous;
 
 import javax.sql.DataSource;
 
+import com.example.sidebeziumdemo.PrintUtils;
 import com.example.sidebeziumdemo.it.snapshots1.MySqlTestContainer;
 import com.zaxxer.hikari.HikariDataSource;
 import io.debezium.engine.ChangeEvent;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -41,7 +43,6 @@ import org.springframework.integration.channel.QueueChannel;
 import org.springframework.integration.config.EnableIntegration;
 import org.springframework.integration.core.MessageProducer;
 import org.springframework.integration.debezium.inbound.DebeziumMessageProducer;
-import org.springframework.integration.debezium.support.DebeziumHeaders;
 import org.springframework.integration.debezium.support.DefaultDebeziumHeaderMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.Message;
@@ -60,7 +61,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 		"debezium.properties.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState",
 		"debezium.properties.transforms.unwrap.drop.tombstones=true",
 		"debezium.properties.transforms.unwrap.delete.handling.mode=rewrite",
-		"debezium.properties.transforms.unwrap.add.fields=name,db,op,table",
+		// "debezium.properties.transforms.unwrap.add.fields=name,db,op,table",
 		"debezium.properties.transforms.unwrap.add.headers=name,db,op,table",
 
 		"debezium.properties.schema.history.internal=io.debezium.relational.history.MemorySchemaHistory",
@@ -73,60 +74,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 		"debezium.properties.topic.prefix=my-topic",
 		"debezium.properties.name=my-connector",
 		"debezium.properties.database.server.id=85744",
+
 		"debezium.properties.connector.class=io.debezium.connector.sqlserver.SqlServerConnector",
 		"debezium.properties.database.user=sa",
 		"debezium.properties.database.password=MyFancyPassword123",
 		"debezium.properties.database.hostname=localhost",
 		"debezium.properties.database.names=testDB",
-		"debezium.properties.database.encrypt=false",
 
 		"debezium.properties.table.include.list=dbo.orders,dbo.customers,dbo.products",
-
-		// JdbcTemplate configuration
-		"app.datasource.username=sa",
-		"app.datasource.password=MyFancyPassword123",
-		// "app.datasource.driver-class-name=com.mysql.cj.jdbc.Driver",
-		"app.datasource.type=com.zaxxer.hikari.HikariDataSource"
 })
 @DirtiesContext
-public class SqlServerDebeziumTests implements MySqlTestContainer {
+public class SimpleTest implements MySqlTestContainer {
 
 	@DynamicPropertySource
 	static void mysqlDbProperties(DynamicPropertyRegistry registry) {
 		registry.add("debezium.properties.database.port", () -> MySqlTestContainer.mappedPort());
-		registry.add("app.datasource.url",
-				() -> String.format("jdbc:sqlserver://localhost:%d;encrypt=false;databaseName=%s",
-						MySqlTestContainer.mappedPort(), "testDB"));
 	}
 
 	@Autowired
 	@Qualifier("queueChannel")
 	private QueueChannel queueChannel;
 
-	@Autowired
-	private JdbcTemplate jdbcTemplate;
-
-	@BeforeEach
-	public void beforeAll() {
-		for (int i = 0; i < 100; i++) {
-			jdbcTemplate.update(
-					"INSERT INTO customers(first_name,last_name,email) " +
-							String.format("VALUES('%s', '%s', '%s@spring.org')", "first_" + i, "last_" + i,
-									"name_" + i));
-
-			System.out.println(i);
-		}
-	}
-
 	@Test
 	void streamMode() {
 		boolean foundDebeziumHeaders = false;
 		for (int i = 0; i < 20; i++) {
-			Message<?> message = this.queueChannel.receive(10_000);
-			assertThat(message).isNotNull();
-			System.out.println(new String((byte[]) message.getPayload()));
+			Message<?> message = this.queueChannel.receive(20_000);
+			assertThat(message).as("Index: " + i).isNotNull();
 
-			System.out.println("DESTINATION: " + message.getHeaders().get(DebeziumHeaders.DESTINATION));
+			System.out.println(PrintUtils.headersToString(message.getHeaders()));
+			System.out.println(PrintUtils.prettyJson((byte[]) message.getPayload()));
+
 			if (message.getHeaders().size() > 5) {
 				assertThat(message.getHeaders()).containsKeys("__name", "__db", "__op", "__table");
 				foundDebeziumHeaders = true;
@@ -137,7 +115,7 @@ public class SqlServerDebeziumTests implements MySqlTestContainer {
 
 	@Configuration
 	@EnableIntegration
-	@EnableAutoConfiguration(exclude = { MongoAutoConfiguration.class })
+	@EnableAutoConfiguration(exclude = { MongoAutoConfiguration.class, DataSourceAutoConfiguration.class})
 	public static class StreamTestConfiguration {
 
 		@Bean
@@ -158,25 +136,6 @@ public class SqlServerDebeziumTests implements MySqlTestContainer {
 		@BridgeFrom("debeziumInputChannel")
 		public MessageChannel queueChannel() {
 			return new QueueChannel();
-		}
-
-		@Bean
-		public JdbcTemplate myJdbcTemplate(DataSource dataSource) {
-			return new JdbcTemplate(dataSource);
-		}
-
-		@Bean
-		@Primary
-		@ConfigurationProperties("app.datasource")
-		public DataSourceProperties dataSourceProperties() {
-			return new DataSourceProperties();
-		}
-
-		@Bean
-		public HikariDataSource dataSource(DataSourceProperties dataSourceProperties) {
-			return dataSourceProperties.initializeDataSourceBuilder()
-					.type(HikariDataSource.class)
-					.build();
 		}
 
 	}

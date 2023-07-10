@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.example.sidebeziumdemo;
+package com.example.sidebeziumdemo.miscellaneous;
 
 import javax.sql.DataSource;
 

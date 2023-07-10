@@ -51,12 +51,6 @@
 			<groupId>org.springframework.cloud.fn</groupId>
 			<artifactId>debezium-autoconfigure</artifactId>
 			<version>${debezium.builder.version}</version>
-			<exclusions>
-				<exclusion>
-					<groupId>io.debezium</groupId>
-					<artifactId>debezium-embedded</artifactId>
-				</exclusion>
-			</exclusions>
 		</dependency>
 
 		<!-- Configure Debezium Inbount Channel Adapter -->
@@ -64,32 +58,14 @@
 			<groupId>org.springframework.integration</groupId>
 			<artifactId>spring-integration-debezium</artifactId>
 			<version>${spring.integration.version}</version>
-			<exclusions>
-				<exclusion>
-					<groupId>io.debezium</groupId>
-					<artifactId>debezium-embedded</artifactId>
-				</exclusion>
-			</exclusions>
 		</dependency>
 
+		<!-- Enable Spring Debezium Channel and Notificaiton integration -->
 		<dependency>
 			<groupId>org.spring.boot.extension.autoconfigure</groupId>
 			<artifactId>debezium-signals</artifactId>
 			<version>0.0.2-SNAPSHOT</version>
 		</dependency>
-
-		<dependency>
-			<groupId>io.debezium</groupId>
-			<artifactId>debezium-embedded</artifactId>
-			<version>${debezium.version}</version>
-			<exclusions>
-				<exclusion>
-					<artifactId>slf4j-log4j12</artifactId>
-					<groupId>org.slf4j</groupId>
-				</exclusion>
-			</exclusions>
-		</dependency>
-
 
 		<dependency>
 			<groupId>io.debezium</groupId>

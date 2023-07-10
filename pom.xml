@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.1.0</version>
+		<relativePath/>
+		<!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.example</groupId>
+	<artifactId>si-debezium-demo</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>si-debezium-demo</name>
+	<description>Demo project for Spring Boot</description>
+	<properties>
+		<java.version>17</java.version>
+		<debezium.version>2.3.0.Final</debezium.version>
+		<debezium.builder.version>4.0.0-SNAPSHOT</debezium.builder.version>
+		<spring.integration.version>6.2.0-SNAPSHOT</spring.integration.version>
+	</properties>
+
+	<dependencies>
+
+		<dependency>
+			<groupId>com.google.guava</groupId>
+			<artifactId>guava</artifactId>
+			<version>31.0.1-jre</version>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>com.google.code.findbugs</groupId>
+			<artifactId>jsr305</artifactId>
+			<version>3.0.2</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter</artifactId>
+		</dependency>
+
+		<!-- Enable Debezium Builder auto-configuration -->
+		<dependency>
+			<groupId>org.springframework.cloud.fn</groupId>
+			<artifactId>debezium-autoconfigure</artifactId>
+			<version>${debezium.builder.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>io.debezium</groupId>
+					<artifactId>debezium-embedded</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+		<!-- Configure Debezium Inbount Channel Adapter -->
+		<dependency>
+			<groupId>org.springframework.integration</groupId>
+			<artifactId>spring-integration-debezium</artifactId>
+			<version>${spring.integration.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>io.debezium</groupId>
+					<artifactId>debezium-embedded</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+		<dependency>
+			<groupId>org.spring.boot.extension.autoconfigure</groupId>
+			<artifactId>debezium-signals</artifactId>
+			<version>0.0.2-SNAPSHOT</version>
+		</dependency>
+
+		<dependency>
+			<groupId>io.debezium</groupId>
+			<artifactId>debezium-embedded</artifactId>
+			<version>${debezium.version}</version>
+			<exclusions>
+				<exclusion>
+					<artifactId>slf4j-log4j12</artifactId>
+					<groupId>org.slf4j</groupId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+
+		<dependency>
+			<groupId>io.debezium</groupId>
+			<artifactId>debezium-connector-sqlserver</artifactId>
+			<version>${debezium.version}</version>
+			<exclusions>
+				<exclusion>
+					<artifactId>slf4j-log4j12</artifactId>
+					<groupId>org.slf4j</groupId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+		<dependency>
+			<groupId>io.debezium</groupId>
+			<artifactId>debezium-connector-postgres</artifactId>
+			<version>${debezium.version}</version>
+			<exclusions>
+				<exclusion>
+					<artifactId>slf4j-log4j12</artifactId>
+					<groupId>org.slf4j</groupId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+		<dependency>
+			<groupId>io.debezium</groupId>
+			<artifactId>debezium-connector-mysql</artifactId>
+			<version>${debezium.version}</version>
+			<exclusions>
+				<exclusion>
+					<artifactId>slf4j-log4j12</artifactId>
+					<groupId>org.slf4j</groupId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>postgresql</artifactId>
+			<version>1.18.3</version>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>mysql</artifactId>
+			<version>1.18.3</version>
+		</dependency>
+		<dependency>
+			<groupId>com.zaxxer</groupId>
+			<artifactId>HikariCP</artifactId>
+			<version>4.0.3</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework</groupId>
+			<artifactId>spring-jdbc</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.awaitility</groupId>
+			<artifactId>awaitility</artifactId>
+			<version>3.0.0</version>
+			<scope>test</scope>
+		</dependency>
+
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>

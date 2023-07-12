@@ -46,6 +46,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.log.LogAccessor;
+import org.springframework.integration.channel.NullChannel;
 import org.springframework.integration.config.EnableIntegration;
 import org.springframework.integration.debezium.dsl.Debezium;
 import org.springframework.integration.debezium.dsl.DebeziumMessageProducerSpec;
@@ -55,6 +56,8 @@ import org.springframework.integration.selector.MetadataStoreSelector;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.Message;
 import org.springframework.test.annotation.DirtiesContext;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author Christian Tzolov
@@ -108,7 +111,7 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 	@Test
 	public void testOffsetCommitPolicyPERIODIC() {
 
-		contextRunner.withPropertyValues("debezium.properties.offset.flush.interval.ms=10000")
+		contextRunner.withPropertyValues("debezium.properties.offset.flush.interval.ms=20000")
 				.run(context -> {
 
 					runDataGenerationWithEmulatedFailures(context, 1, 15000);
@@ -117,8 +120,8 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 
 					logger.info("[TOTAL PERIODIC] Duplications:" + config.totalDuplications.get());
 
-					// assertThat(config.totalDuplications.get()).isGreaterThan(0)
-					// .as("The PERIODIC commit policy presumes a decent amount of duplications");
+					assertThat(config.totalDuplications.getAndSet(0)).isEqualTo(0)
+							.as("The Idempotent receiver should have filtered out the duplicates.");
 				});
 
 	}
@@ -166,44 +169,42 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 
 		ObjectMapper mapper = new ObjectMapper();
 
-		AtomicLong duplications = new AtomicLong(0);
+		AtomicLong duplicationsBetweenFailures = new AtomicLong(0);
 
 		AtomicLong totalDuplications = new AtomicLong(0);
 
 		@Bean
 		public IntegrationFlow streamFlowFromBuilder(DebeziumEngine.Builder<ChangeEvent<byte[], byte[]>> builder) {
 
-			builder = builder.using(new DebeziumEngine.ConnectorCallback() {
-				@Override
-				public void taskStarted() {
-					try {
-						barrier.await();
-					}
-					catch (InterruptedException | BrokenBarrierException e) {
-						e.printStackTrace();
-					}
-				}
-			});
-
-			DebeziumMessageProducerSpec dsl = Debezium.inboundChannelAdapter(builder)
+			DebeziumMessageProducerSpec dsl = Debezium.inboundChannelAdapter(builder.using(connectorCallback))
 					.headerNames("*")
 					.contentType("application/json")
 					.enableBatch(false)
 					.enableEmptyPayload(true);
 
 			return IntegrationFlow.from(dsl)
-					.handle(m -> {
-
-						Integer messageValue = getMessageValue(m);
-
-						if (valueSet.contains(messageValue)) {
-							duplications.incrementAndGet();
-						}
-
-						valueSet.add(messageValue);
-					}, endpointSpec -> endpointSpec.advice(idempotentReceiverInterceptor()))
+					.handle(
+							message -> {
+								if (valueSet.add(getMessageValue(message)) == false) {
+									duplicationsBetweenFailures.incrementAndGet();
+								}
+							},
+							endpointSpec -> endpointSpec.advice(idempotentReceiverInterceptor()))
 					.get();
 		}
+
+		// The Barrier ensures that the debezium listener and the data generator would start at the same time.
+		DebeziumEngine.ConnectorCallback connectorCallback = new DebeziumEngine.ConnectorCallback() {
+			@Override
+			public void taskStarted() {
+				try {
+					barrier.await();
+				}
+				catch (InterruptedException | BrokenBarrierException e) {
+					e.printStackTrace();
+				}
+			}
+		};
 
 		private void insertRow(JdbcTemplate jdbcTemplate, int i) {
 			jdbcTemplate.update(String.format("INSERT INTO public.eos_test(val) VALUES (%s) ", i));
@@ -212,9 +213,9 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 		private void pgTerminateBackend(JdbcTemplate jdbcTemplate) {
 			Executors.newSingleThreadExecutor().submit(() -> {
 
-				totalDuplications.addAndGet(duplications.get());
+				totalDuplications.addAndGet(duplicationsBetweenFailures.get());
 
-				logger.info("[LOCAL] Dup.:" + duplications.getAndSet(0));
+				logger.info("[LOCAL] Dup.:" + duplicationsBetweenFailures.getAndSet(0));
 
 				List<Map<String, Object>> result = jdbcTemplate.queryForList(
 						"SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
@@ -262,14 +263,10 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 
 		@Bean
 		public IdempotentReceiverInterceptor idempotentReceiverInterceptor() {
-			return new IdempotentReceiverInterceptor(
-					new MetadataStoreSelector(
-							message -> {
-								// String lsn = "" + getMessageLsn(message);
-								String lsn = "" + getMessageValue(message);
-								// System.out.println(lsn);
-								return lsn;
-							}));
+			IdempotentReceiverInterceptor idempotentReceiver = new IdempotentReceiverInterceptor(
+					new MetadataStoreSelector(message -> "" + getMessageLsn(message)));
+			idempotentReceiver.setDiscardChannel(new NullChannel()); // discards the duplicates.
+			return idempotentReceiver;
 		}
 	}
 

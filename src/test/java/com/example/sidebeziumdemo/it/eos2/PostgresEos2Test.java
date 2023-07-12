@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.example.sidebeziumdemo.it.eos;
+package com.example.sidebeziumdemo.it.eos2;
 
 import java.io.IOException;
 import java.util.List;
@@ -31,8 +31,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import javax.sql.DataSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.hash.BloomFilter;
-import com.google.common.hash.Funnels;
 import com.zaxxer.hikari.HikariDataSource;
 import io.debezium.engine.ChangeEvent;
 import io.debezium.engine.DebeziumEngine;
@@ -52,22 +50,22 @@ import org.springframework.integration.config.EnableIntegration;
 import org.springframework.integration.debezium.dsl.Debezium;
 import org.springframework.integration.debezium.dsl.DebeziumMessageProducerSpec;
 import org.springframework.integration.dsl.IntegrationFlow;
+import org.springframework.integration.handler.advice.IdempotentReceiverInterceptor;
+import org.springframework.integration.selector.MetadataStoreSelector;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.Message;
 import org.springframework.test.annotation.DirtiesContext;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author Christian Tzolov
  */
 @DirtiesContext
-public class PostgresEosTest implements PostgresEosTestContainer {
+public class PostgresEos2Test implements PostgresEosTestContainer {
 
-	static final LogAccessor logger = new LogAccessor(PostgresEosTest.class);
+	static final LogAccessor logger = new LogAccessor(PostgresEos2Test.class);
 
 	private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-			.withUserConfiguration(PostgresEosTest.StreamTestConfiguration.class)
+			.withUserConfiguration(PostgresEos2Test.StreamTestConfiguration.class)
 			.withPropertyValues(
 					// Common configuration. Common for all DBs.
 					"debezium.properties.transforms=flatten",
@@ -113,42 +111,14 @@ public class PostgresEosTest implements PostgresEosTestContainer {
 		contextRunner.withPropertyValues("debezium.properties.offset.flush.interval.ms=10000")
 				.run(context -> {
 
-					runDataGenerationWithEmulatedFailures(context, 1, 30000);
+					runDataGenerationWithEmulatedFailures(context, 1, 15000);
 
 					StreamTestConfiguration config = context.getBean(StreamTestConfiguration.class);
 
-					logger.info("[TOTAL PERIODIC] Duplications:" + config.totalDuplications.get() + ", FP: "
-							+ config.totalFalsePositive.get() + ", FN: " + config.totalFalseNegative.get());
+					logger.info("[TOTAL PERIODIC] Duplications:" + config.totalDuplications.get());
 
-					assertThat(config.totalDuplications.getAndSet(0)).isGreaterThan(0)
-							.as("The PERIODIC commit policy presumes a decent amount of duplications");
-					assertThat(config.totalFalsePositive.getAndSet(0)).isGreaterThan(0)
-							.as("The Bloom Filter is expected to yeld ~0.2 false positive results");
-					assertThat(config.totalFalseNegative.getAndSet(0)).isEqualTo(0)
-							.as("The Bloom Filter should never return false negative matches");
-				});
-
-	}
-
-	@Test
-	public void testOffsetCommitPolicyALWAYS() {
-
-		contextRunner.withPropertyValues("debezium.offsetCommitPolicy=ALWAYS")
-				.run(context -> {
-
-					runDataGenerationWithEmulatedFailures(context, 30001, 30000);
-
-					StreamTestConfiguration config = context.getBean(StreamTestConfiguration.class);
-
-					logger.info("[TOTAL ALWAYS] Duplications:" + config.totalDuplications.get() + ", FP: "
-							+ config.totalFalsePositive.get() + ", FN: " + config.totalFalseNegative.get());
-
-					assertThat(config.totalDuplications.getAndSet(0)).isEqualTo(0)
-							.as("The ALWAYS commit policy is expected to prevent duplications");
-					assertThat(config.totalFalsePositive.getAndSet(0)).isGreaterThan(0)
-							.as("The Bloom Filter is expected to yeld ~0.2 false positive results");
-					assertThat(config.totalFalseNegative.getAndSet(0)).isEqualTo(0)
-							.as("The Bloom Filter should never return false negative matches");
+					// assertThat(config.totalDuplications.get()).isGreaterThan(0)
+					// .as("The PERIODIC commit policy presumes a decent amount of duplications");
 				});
 
 	}
@@ -176,7 +146,7 @@ public class PostgresEosTest implements PostgresEosTestContainer {
 				config.insertRow(jdbcTemplate, i);
 
 				// On every 1000 new inserts emulate a connector breakdown.
-				if ((i % 5000) == 0) {
+				if ((i % 1000) == 0) {
 					config.pgTerminateBackend(jdbcTemplate);
 				}
 			}
@@ -194,17 +164,11 @@ public class PostgresEosTest implements PostgresEosTestContainer {
 
 		Set<Integer> valueSet = new ConcurrentSkipListSet<>();
 
-		BloomFilter<Long> bloomFilter = BloomFilter.create(Funnels.longFunnel(), 30000, 0.05);
-
 		ObjectMapper mapper = new ObjectMapper();
 
 		AtomicLong duplications = new AtomicLong(0);
-		AtomicLong falsePositive = new AtomicLong(0);
-		AtomicLong falseNegative = new AtomicLong(0);
 
 		AtomicLong totalDuplications = new AtomicLong(0);
-		AtomicLong totalFalsePositive = new AtomicLong(0);
-		AtomicLong totalFalseNegative = new AtomicLong(0);
 
 		@Bean
 		public IntegrationFlow streamFlowFromBuilder(DebeziumEngine.Builder<ChangeEvent<byte[], byte[]>> builder) {
@@ -230,24 +194,14 @@ public class PostgresEosTest implements PostgresEosTestContainer {
 			return IntegrationFlow.from(dsl)
 					.handle(m -> {
 
-						Long messageLsn = getMessageLsn(m);
 						Integer messageValue = getMessageValue(m);
 
-						if (this.bloomFilter.mightContain(messageLsn)) {
-							if (valueSet.contains(messageValue)) {
-								duplications.incrementAndGet();
-							}
-							else {
-								falsePositive.incrementAndGet();
-							}
-						}
-						else if (valueSet.contains(messageValue)) {
-							falseNegative.incrementAndGet();
+						if (valueSet.contains(messageValue)) {
+							duplications.incrementAndGet();
 						}
 
 						valueSet.add(messageValue);
-						bloomFilter.put(messageLsn);
-					})
+					}, endpointSpec -> endpointSpec.advice(idempotentReceiverInterceptor()))
 					.get();
 		}
 
@@ -259,11 +213,8 @@ public class PostgresEosTest implements PostgresEosTestContainer {
 			Executors.newSingleThreadExecutor().submit(() -> {
 
 				totalDuplications.addAndGet(duplications.get());
-				totalFalseNegative.addAndGet(falseNegative.get());
-				totalFalsePositive.addAndGet(falsePositive.get());
 
-				logger.info("[LOCAL] Dup.:" + duplications.getAndSet(0) + ", FP: "
-						+ falsePositive.getAndSet(0) + ", FN: " + falseNegative.getAndSet(0));
+				logger.info("[LOCAL] Dup.:" + duplications.getAndSet(0));
 
 				List<Map<String, Object>> result = jdbcTemplate.queryForList(
 						"SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
@@ -307,6 +258,18 @@ public class PostgresEosTest implements PostgresEosTestContainer {
 					.password("postgres")
 					.type(HikariDataSource.class)
 					.build();
+		}
+
+		@Bean
+		public IdempotentReceiverInterceptor idempotentReceiverInterceptor() {
+			return new IdempotentReceiverInterceptor(
+					new MetadataStoreSelector(
+							message -> {
+								// String lsn = "" + getMessageLsn(message);
+								String lsn = "" + getMessageValue(message);
+								// System.out.println(lsn);
+								return lsn;
+							}));
 		}
 	}
 

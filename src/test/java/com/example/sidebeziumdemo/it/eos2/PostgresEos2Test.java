@@ -109,16 +109,15 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 	}
 
 	@Test
-	public void testOffsetCommitPolicyPERIODIC() {
+	public void testPeriodicOffsetCommit() {
 
-		contextRunner.withPropertyValues("debezium.properties.offset.flush.interval.ms=20000")
+		contextRunner
+				.withPropertyValues("debezium.properties.offset.flush.interval.ms=20000")
 				.run(context -> {
 
 					runDataGenerationWithEmulatedFailures(context, 1, 15000);
 
 					StreamTestConfiguration config = context.getBean(StreamTestConfiguration.class);
-
-					logger.info("[TOTAL PERIODIC] Duplications:" + config.totalDuplications.get());
 
 					assertThat(config.totalDuplications.getAndSet(0)).isEqualTo(0)
 							.as("The Idempotent receiver should have filtered out the duplicates.");
@@ -136,13 +135,8 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 
 		Executors.newSingleThreadExecutor().submit(() -> {
 
-			try {
-				// wait until the Debezium connector is up and running.
-				barrier.await();
-			}
-			catch (InterruptedException | BrokenBarrierException e) {
-				logger.error(e, "Failed to reach data generation start phase.");
-			}
+			// wait until the Debezium connector is up and running.
+			barrierAwait();
 
 			for (int i = startIndex; i < startIndex + size; i++) {
 				// Continuously insert new data entries.
@@ -160,6 +154,17 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 		Awaitility.await().until(() -> dataGenerationStopped.get());
 	}
 
+	static void barrierAwait() {
+		try {
+			// wait until the Debezium connector is up and running.
+			barrier.await();
+		}
+		catch (InterruptedException | BrokenBarrierException e) {
+			logger.error(e, "Failed to reach data generation start phase.");
+		}
+
+	}
+
 	@SpringBootConfiguration
 	@EnableIntegration
 	@EnableAutoConfiguration(exclude = { MongoAutoConfiguration.class })
@@ -169,14 +174,22 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 
 		ObjectMapper mapper = new ObjectMapper();
 
-		AtomicLong duplicationsBetweenFailures = new AtomicLong(0);
+		AtomicLong singleFailureDuplicationCount = new AtomicLong(0);
 
 		AtomicLong totalDuplications = new AtomicLong(0);
 
 		@Bean
 		public IntegrationFlow streamFlowFromBuilder(DebeziumEngine.Builder<ChangeEvent<byte[], byte[]>> builder) {
 
-			DebeziumMessageProducerSpec dsl = Debezium.inboundChannelAdapter(builder.using(connectorCallback))
+			DebeziumMessageProducerSpec dsl = Debezium
+					.inboundChannelAdapter(builder.using(new DebeziumEngine.ConnectorCallback() {
+						// The Barrier ensures that the debezium listener and the data generator would start at the same
+						// time.
+						@Override
+						public void taskStarted() {
+							barrierAwait();
+						}
+					}))
 					.headerNames("*")
 					.contentType("application/json")
 					.enableBatch(false)
@@ -186,25 +199,12 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 					.handle(
 							message -> {
 								if (valueSet.add(getMessageValue(message)) == false) {
-									duplicationsBetweenFailures.incrementAndGet();
+									singleFailureDuplicationCount.incrementAndGet();
 								}
 							},
 							endpointSpec -> endpointSpec.advice(idempotentReceiverInterceptor()))
 					.get();
 		}
-
-		// The Barrier ensures that the debezium listener and the data generator would start at the same time.
-		DebeziumEngine.ConnectorCallback connectorCallback = new DebeziumEngine.ConnectorCallback() {
-			@Override
-			public void taskStarted() {
-				try {
-					barrier.await();
-				}
-				catch (InterruptedException | BrokenBarrierException e) {
-					e.printStackTrace();
-				}
-			}
-		};
 
 		private void insertRow(JdbcTemplate jdbcTemplate, int i) {
 			jdbcTemplate.update(String.format("INSERT INTO public.eos_test(val) VALUES (%s) ", i));
@@ -213,9 +213,9 @@ public class PostgresEos2Test implements PostgresEosTestContainer {
 		private void pgTerminateBackend(JdbcTemplate jdbcTemplate) {
 			Executors.newSingleThreadExecutor().submit(() -> {
 
-				totalDuplications.addAndGet(duplicationsBetweenFailures.get());
+				logger.info("[BETWEEN] Duplicates: " + singleFailureDuplicationCount.get());
 
-				logger.info("[LOCAL] Dup.:" + duplicationsBetweenFailures.getAndSet(0));
+				totalDuplications.addAndGet(singleFailureDuplicationCount.getAndSet(0));
 
 				List<Map<String, Object>> result = jdbcTemplate.queryForList(
 						"SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
